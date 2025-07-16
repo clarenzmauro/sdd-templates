@@ -44,175 +44,270 @@ Tasks are executed one at a time with focus on:
 
 ## MCP Server
 
-This project includes a Model Context Protocol (MCP) server that provides AI assistants with tools to generate SDD documents automatically.
+This project includes a lightweight Model Context Protocol (MCP) server that provides AI assistants with comprehensive guidance on the Spec Driven Development (SDD) process and instructs them to create SDD documentation files.
 
 ### Features
 
-- **Secure Document Generation** - Input validation and sanitization
-- **Template-Based Output** - Consistent document structure
-- **Rate Limiting** - Prevents abuse and ensures stability
-- **Error Handling** - Comprehensive validation and error reporting
-- **Docker Support** - Easy deployment and scaling
+- **SDD Process Guidance** - Provides comprehensive instructions on the SDD methodology
+- **AI Instructions** - Tells AI assistants how to create `.sdd/` directory and generate SDD files
+- **Template Guidance** - Guides creation of requirements, design, and task documents using exact template formats
+- **Human-in-the-Loop Process** - Enforces mandatory approval phases between each step
+- **Context7 Integration** - Leverages latest documentation when available for technology recommendations
+- **Docker Support** - Containerized deployment for easy integration
+- **Lightweight** - Simple, focused implementation without complex file handling
 
 ### Available Tools
 
-#### `generate_requirements`
-Generates a requirements document with:
-- Project introduction and description
-- User stories with acceptance criteria
-- Structured requirement numbering
+#### `sdd_guide`
+Provides comprehensive guidance on the Spec Driven Development process and instructs AI assistants on how to create SDD documentation.
 
-#### `generate_design`
-Creates design documents including:
-- System overview and architecture
-- Technology stack specifications
-- Component and data model definitions
-- API contract outlines
+**Parameters:**
+- `query` (string): User query or project description to guide the SDD process (1-1000 characters)
 
-#### `generate_tasks`
-Produces implementation plans with:
-- Project timeline and deliverables
-- Detailed task breakdowns
-- Dependencies and estimates
-- Definition of done criteria
+**What it does:**
+- Explains the SDD methodology (Requirements → Design → Tasks → Implementation)
+- Instructs the AI to create a `.sdd/` directory (and add it to `.gitignore`)
+- Guides creation of three core files using exact template formats:
+  - `requirements.md` - User stories and acceptance criteria
+  - `design.md` - System architecture and tech stack
+  - `tasks.md` - Implementation plan with tasks and estimates
+- Enforces a mandatory phase-by-phase approval process
+- Integrates with Context7 MCP server for latest documentation when available
 
 ## Installation
 
 ### Prerequisites
-- Node.js 18+ 
-- npm or yarn
-- Docker (optional, for containerized deployment)
+- **Node.js 18+** (for local installation)
+- **Docker** (for containerized deployment)
+- **Git** (to clone the repository)
 
-### Local Setup
+### Quick Start
 
-1. Clone the repository:
+1. **Clone the repository:**
 ```bash
 git clone https://github.com/clarenzmauro/sdd-templates.git
-cd sdd-templates
+cd sdd-templates/sdd-server
 ```
 
-2. Install MCP server dependencies:
+2. **Choose your installation method:**
+
+**Option A: Docker (Recommended)**
 ```bash
-cd sdd-server
+# Build the Docker image
+docker build -t sdd-server:latest .
+
+# Start the persistent container
+docker-compose up -d
+```
+
+**Option B: Local Installation**
+```bash
+# Install dependencies
 npm install
-```
 
-3. Build the server:
-```bash
+# Build the project
 npm run build
-```
 
-4. Run the server:
-```bash
+# Start the server
 npm start
 ```
 
-### Docker Deployment
-
-1. Build the Docker image:
+3. **Verify installation:**
 ```bash
-cd sdd-server
-npm run docker:build
+# Test with Docker
+docker run --rm sdd-server:latest --help
+
+# Or test locally
+node build/index.js --help
 ```
 
-2. Run with Docker Compose:
-```bash
-npm run docker:compose
-```
+### Adding to Cline MCP Servers
 
-### MCP Configuration
+#### Quick Setup (Recommended)
 
-Add the server to your MCP client configuration:
+After building the Docker image, add the SDD server to Cline:
 
-```json
-{
-  "mcpServers": {
-    "sdd-server": {
-      "command": "node",
-      "args": ["/path/to/sdd-server/build/index.js"],
-      "env": {
-        "SERVER_NAME": "sdd-server",
-        "SERVER_VERSION": "0.1.0"
-      }
-    }
-  }
-}
-```
+1. **Open Cline Settings**
+   - In VS Code, open Command Palette (`Cmd+Shift+P` on Mac, `Ctrl+Shift+P` on Windows/Linux)
+   - Type "Cline: Open MCP Settings"
+   - Or manually open: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+
+2. **Start the persistent container:**
+   ```bash
+   cd /path/to/your/sdd-server
+   docker-compose up -d
+   ```
+
+3. **Add SDD Server Configuration (Docker Compose - Recommended):**
+   ```json
+   {
+     "mcpServers": {
+       "sdd-server": {
+         "command": "docker-compose",
+         "args": [
+           "-f", "/path/to/your/sdd-server/docker-compose.yml",
+           "exec", "sdd-server", "node", "build/index.js"
+         ],
+         "disabled": false,
+         "autoApprove": [
+           "sdd_guide"
+         ]
+       }
+     }
+   }
+   ```
+   **Important**: Replace `/path/to/your/sdd-server/` with the actual path to your cloned repository.
+
+4. **Alternative configurations:**
+
+   **Direct Docker Command:**
+   ```json
+   {
+     "mcpServers": {
+       "sdd-server": {
+         "command": "docker",
+         "args": [
+           "run", "--rm", "-i",
+           "-v", "${PWD}:/workspace",
+           "sdd-server:latest"
+         ],
+         "disabled": false,
+         "autoApprove": [
+           "sdd_guide"
+         ]
+       }
+     }
+   }
+   ```
+
+   **Local Development:**
+   ```json
+   {
+     "mcpServers": {
+       "sdd-server": {
+         "command": "node",
+         "args": ["/path/to/your/sdd-server/build/index.js"],
+         "disabled": false,
+         "autoApprove": [
+           "sdd_guide"
+         ]
+       }
+     }
+   }
+   ```
+
+#### Verifying the Setup
+
+1. **Restart Cline** after updating the MCP settings
+2. **Check Server Status** - You should see "sdd-server" listed in Cline's MCP servers
+3. **Test Connection** - Try using the SDD guide tool in Cline
+
+**Remember**: For Docker Compose setup, you must run `docker-compose up -d` first to start the persistent container!
 
 ## Usage Example
 
 Here's how to use SDD in practice:
 
-### Step 1: Requirements
-Ask the AI: "I want to build a task management application for teams"
+### Using the SDD Guide Tool
 
-The AI uses the `generate_requirements` tool to create:
-```markdown
-# Requirements Document
+Simply ask the AI: "I want to build a task management application for teams"
 
-## Introduction
-A collaborative task management application that enables teams to organize, track, and complete work efficiently.
+The AI will use the `sdd_guide` tool automatically and provide comprehensive guidance on implementing the SDD process for your specific project.
 
-## Requirements
+### The SDD Process Flow
 
-### Requirement 1
-**User Story:** As a team member, I want to create tasks so that I can track work that needs to be done.
+#### Phase 1: Setup and Requirements
+1. **Directory Creation**: AI creates `.sdd/` directory and adds it to `.gitignore`
+2. **Requirements Generation**: AI creates `requirements.md` using exact template format:
+   ```markdown
+   # Requirements Document
 
-#### Acceptance Criteria
-- Users can create tasks with title, description, and due date
-- Tasks are automatically assigned a unique ID
-- Created tasks appear in the team's task list
+   ## Introduction
+   A collaborative task management application that enables teams to organize, track, and complete work efficiently.
+
+   ## Requirements
+
+   ### Requirement 1
+   **User Story:** As a team member, I want to create tasks so that I can track work that needs to be done.
+
+   #### Acceptance Criteria
+   - Users can create tasks with title, description, and due date
+   - Tasks are automatically assigned a unique ID
+   - Created tasks appear in the team's task list
+   ```
+3. **Mandatory Approval**: AI waits for your approval before proceeding
+
+#### Phase 2: Design (Only after Phase 1 approval)
+1. **Context7 Integration**: If available, AI fetches latest documentation for recommended technologies
+2. **Design Generation**: AI creates `design.md` with current best practices:
+   ```markdown
+   # Design Document
+
+   ## Technology Stack
+   - **Frontend**: React with TypeScript
+   - **Backend**: Node.js with Express
+   - **Database**: PostgreSQL
+   - **Infrastructure**: Docker containers
+   ```
+3. **Mandatory Approval**: AI waits for your approval before proceeding
+
+#### Phase 3: Implementation Planning (Only after Phase 2 approval)
+1. **Task Breakdown**: AI creates `tasks.md` with detailed implementation plan:
+   ```markdown
+   # Implementation Plan
+
+   ## Tasks
+
+   ### Task 1: Database Schema Setup
+   - [ ] **Description**: Create PostgreSQL schema for users, teams, and tasks
+   - [ ] **Acceptance Criteria**: 
+     - All tables created with proper relationships
+     - Indexes added for performance
+   - [ ] **Dependencies**: None
+   - [ ] **Requirements Reference**: REQ-1
+   ```
+2. **Final Approval**: AI waits for your approval before implementation
+
+### Key Features
+
+- **Human-in-the-Loop**: Mandatory approval between each phase ensures you stay in control
+- **Latest Documentation**: Context7 integration provides current best practices and API references
+- **Exact Templates**: Consistent document structure across all projects
+- **Local `.sdd/` Directory**: All planning documents stay local and are not committed to version control
+
+## The `.sdd/` Directory Approach
+
+The SDD process uses a local `.sdd/` directory to store all planning documents:
+
+- **Local Only**: All SDD files remain on your local machine
+- **Git Ignored**: Automatically added to `.gitignore` to prevent accidental commits
+- **Organized Structure**: Clean separation between planning docs and project code
+- **Secure**: No sensitive planning information is committed to version control
+
+### Directory Structure
 ```
-
-### Step 2: Design
-AI generates design based on requirements:
-```markdown
-# Design Document
-
-## Technology Stack
-- **Frontend**: React with TypeScript
-- **Backend**: Node.js with Express
-- **Database**: PostgreSQL
-- **Infrastructure**: Docker containers
+your-project/
+├── .sdd/                    # Local planning documents (git ignored)
+│   ├── requirements.md      # User stories and acceptance criteria
+│   ├── design.md           # System architecture and tech stack
+│   └── tasks.md            # Implementation plan
+├── .gitignore              # Contains .sdd/ entry
+└── [your project files]    # Actual implementation
 ```
-
-### Step 3: Tasks
-AI creates implementation plan:
-```markdown
-# Implementation Plan
-
-## Tasks
-
-### Task 1: Database Schema Setup
-- [ ] **Description**: Create PostgreSQL schema for users, teams, and tasks
-- [ ] **Acceptance Criteria**: 
-  - All tables created with proper relationships
-  - Indexes added for performance
-- [ ] **Estimate**: 4 hours
-```
-
-### Step 4: Implementation
-Execute tasks one by one, ensuring each meets acceptance criteria before moving to the next.
-
-## Security Features
-
-The MCP server includes several security measures:
-
-- **Input Validation** - All inputs are validated and sanitized
-- **File System Security** - Restricted file operations to allowed directories
-- **Rate Limiting** - Prevents abuse with configurable limits
-- **Content Size Limits** - Prevents resource exhaustion
-- **Path Traversal Protection** - Blocks dangerous file operations
 
 ## Configuration
 
-Environment variables for customization:
+The server supports basic configuration through environment variables:
 
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SERVER_NAME` | Server identification name | sdd-server |
+| `SERVER_VERSION` | Server version | 0.1.0 |
+
+Example configuration:
 ```bash
-SERVER_NAME=sdd-server
+SERVER_NAME=my-sdd-server
 SERVER_VERSION=0.1.0
-MAX_FILE_SIZE=1048576  # 1MB
-MAX_INPUT_LENGTH=10000
 ```
 
 ## Development
@@ -243,12 +338,44 @@ sdd-templates/
 
 ```bash
 # Build the server
+cd sdd-server
 npm run build
 
 # Run in development mode
 npm run watch
 
 # Run with MCP inspector for debugging
+npm run inspector
+
+# Docker development
+npm run docker:build      # Build Docker image
+npm run docker:run        # Run container
+npm run docker:compose    # Start with Docker Compose
+```
+
+### Troubleshooting
+
+#### Common Issues
+
+1. **Server Not Starting**
+   - Ensure Node.js 18+ is installed
+   - Check that all dependencies are installed: `npm install`
+   - Verify the build completed successfully: `npm run build`
+
+2. **Docker Issues**
+   - Ensure Docker is running: `docker ps`
+   - Check if the image was built: `docker images sdd-server`
+   - Restart the container: `docker-compose restart`
+
+3. **MCP Integration Issues**
+   - Ensure JSON syntax is valid in MCP settings
+   - Restart VS Code/Cline completely after configuration changes
+   - Check Cline's output panel for error messages
+   - For Docker Compose setup, ensure the container is running: `docker-compose ps`
+
+#### Debug Mode
+Use the MCP Inspector for debugging:
+```bash
 npm run inspector
 ```
 

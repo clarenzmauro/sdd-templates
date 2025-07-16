@@ -1,0 +1,42 @@
+{
+  "name": "sdd-server",
+  "version": "0.1.0",
+  "description": "Simplifies the SDD process for the AI",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "sdd-server": "./build/index.js"
+  },
+  "files": [
+    "build",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "start": "node build/index.js",
+    "watch": "tsc --watch",
+    "inspector": "npx @modelcontextprotocol/inspector build/index.js",
+    "docker:build": "docker build -t sdd-server:latest .",
+    "docker:run": "docker run --rm -i sdd-server:latest",
+    "docker:compose": "docker-compose up -d",
+    "docker:deploy": "./deploy.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "0.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "sdd",
+    "spec-driven-development",
+    "requirements",
+    "design",
+    "tasks"
+  ],
+  "author": "SDD Development Team",
+  "license": "MIT"
+}

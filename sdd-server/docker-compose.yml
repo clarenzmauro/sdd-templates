@@ -1,0 +1,17 @@
+services:
+  sdd-server:
+    build: .
+    image: sdd-server:latest
+    container_name: sdd-mcp-server
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    volumes:
+      # Mount a volume for output files if needed
+      - ./output:/app/output
+    environment:
+      - NODE_ENV=production
+    # Since MCP servers typically use stdio, we don't need to expose ports
+    # but we can add this if we want to expose an HTTP interface later
+    # ports:
+    #   - "3000:3000"

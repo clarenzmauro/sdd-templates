@@ -2,7 +2,6 @@
 
 ## Overview
 - **Project**: 
-- **Estimated Duration**: 
 - **Key Deliverables**: 
 
 ## Tasks
@@ -11,21 +10,18 @@
 - [ ] **Description**: 
 - [ ] **Acceptance Criteria**: 
 - [ ] **Dependencies**: 
-- [ ] **Estimate**: 
 - [ ] **Requirements Reference**: REQ-
 
 ### Task 2: [Component/Feature Name]
 - [ ] **Description**: 
 - [ ] **Acceptance Criteria**: 
 - [ ] **Dependencies**: 
-- [ ] **Estimate**: 
 - [ ] **Requirements Reference**: REQ-
 
 ### Task 3: [Component/Feature Name]
 - [ ] **Description**: 
 - [ ] **Acceptance Criteria**: 
 - [ ] **Dependencies**: 
-- [ ] **Estimate**: 
 - [ ] **Requirements Reference**: REQ-
 
 ## Definition of Done

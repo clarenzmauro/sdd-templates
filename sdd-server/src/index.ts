@@ -1,465 +1,183 @@
 #!/usr/bin/env node
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ErrorCode,
   ListToolsRequestSchema,
   McpError,
-} from '@modelcontextprotocol/sdk/types.js';
-import fs from 'fs/promises';
-import path from 'path';
+} from "@modelcontextprotocol/sdk/types.js";
 
 // =============================================
-// Configuration and Types
+// Configuration
 // =============================================
 
-interface ServerConfig {
+const config = {
   server: {
-    name: string;
-    version: string;
-  };
-  security: {
-    maxFileSize: number;
-    maxInputLength: number;
-    allowedExtensions: string[];
-    allowedDirs: string[];
-  };
-}
-
-const config: ServerConfig = {
-  server: {
-    name: process.env.SERVER_NAME || 'sdd-server',
-    version: process.env.SERVER_VERSION || '0.1.0',
-  },
-  security: {
-    maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '1048576'), // 1MB
-    maxInputLength: parseInt(process.env.MAX_INPUT_LENGTH || '10000'),
-    allowedExtensions: ['.md', '.txt'],
-    allowedDirs: ['./output', './temp', './'],
+    name: process.env.SERVER_NAME || "sdd-server",
+    version: process.env.SERVER_VERSION || "0.1.0",
   },
 };
 
-interface RequirementArgs {
-  projectName: string;
-  projectDescription: string;
-  requirements: Array<{
-    userStory: string;
-    acceptanceCriteria: string[];
-  }>;
-  outputPath?: string;
-}
-
-interface DesignArgs {
-  projectName: string;
-  projectDescription: string;
-  techStack: {
-    frontend?: string;
-    backend?: string;
-    database?: string;
-    infrastructure?: string;
-  };
-  components?: string[];
-  dataModels?: string[];
-  outputPath?: string;
-}
-
-interface TasksArgs {
-  projectName: string;
-  estimatedDuration: string;
-  keyDeliverables: string[];
-  tasks: Array<{
-    name: string;
-    description: string;
-    acceptanceCriteria: string[];
-    dependencies: string[];
-    estimate: string;
-    requirementRef?: string;
-  }>;
-  outputPath?: string;
-}
-
-// =============================================
-// Custom Error Classes
-// =============================================
-
-class SddError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public httpStatus: number = 400
-  ) {
-    super(message);
-    this.name = 'SddError';
-  }
-}
-
-// =============================================
-// Security and Validation
-// =============================================
-
-class InputValidator {
-  static validateProjectName(name: string): string {
-    if (typeof name !== 'string') {
-      throw new SddError('Project name must be a string', 'INVALID_TYPE');
-    }
-    
-    if (name.length === 0 || name.length > 100) {
-      throw new SddError('Project name must be 1-100 characters', 'INVALID_LENGTH');
-    }
-    
-    if (!/^[a-zA-Z0-9\s\-_.]{1,100}$/.test(name)) {
-      throw new SddError('Project name contains invalid characters', 'INVALID_FORMAT');
-    }
-    
-    return name.trim();
-  }
-
-  static validateDescription(desc: string): string {
-    if (typeof desc !== 'string') {
-      throw new SddError('Description must be a string', 'INVALID_TYPE');
-    }
-    
-    if (desc.length > config.security.maxInputLength) {
-      throw new SddError(`Description too long (max ${config.security.maxInputLength} chars)`, 'DESCRIPTION_TOO_LONG');
-    }
-    
-    return this.sanitizeHtml(desc);
-  }
-
-  static validateUserStory(story: string): string {
-    if (typeof story !== 'string') {
-      throw new SddError('User story must be a string', 'INVALID_TYPE');
-    }
-    
-    if (story.length === 0 || story.length > 1000) {
-      throw new SddError('User story must be 1-1000 characters', 'INVALID_LENGTH');
-    }
-    
-    return this.sanitizeHtml(story);
-  }
-
-  static validateAcceptanceCriteria(criteria: string[]): string[] {
-    if (!Array.isArray(criteria)) {
-      throw new SddError('Acceptance criteria must be an array', 'INVALID_TYPE');
-    }
-    
-    if (criteria.length === 0) {
-      throw new SddError('At least one acceptance criterion is required', 'EMPTY_CRITERIA');
-    }
-    
-    return criteria.map(criterion => {
-      if (typeof criterion !== 'string') {
-        throw new SddError('Each acceptance criterion must be a string', 'INVALID_TYPE');
-      }
-      
-      if (criterion.length > 500) {
-        throw new SddError('Acceptance criterion too long (max 500 chars)', 'CRITERION_TOO_LONG');
-      }
-      
-      return this.sanitizeHtml(criterion);
-    });
-  }
-
-  private static sanitizeHtml(input: string): string {
-    return input
-      .replace(/[<>]/g, '') // Remove HTML brackets
-      .replace(/javascript:/gi, '') // Remove javascript: protocol
-      .replace(/on\w+=/gi, '') // Remove event handlers
-      .replace(/\.\./g, '') // Prevent path traversal
-      .trim();
-  }
-}
-
-class SecureFileManager {
-  static async writeSecurely(filePath: string, content: string): Promise<string> {
-    // Validate and resolve path
-    const resolvedPath = this.validateOutputPath(filePath);
-    
-    // Check content size
-    if (Buffer.byteLength(content, 'utf8') > config.security.maxFileSize) {
-      throw new SddError('Content too large', 'FILE_TOO_LARGE');
-    }
-
-    // Ensure directory exists
-    await this.ensureDirectory(path.dirname(resolvedPath));
-    
-    // Write file with secure permissions
-    await fs.writeFile(resolvedPath, content, { mode: 0o644 });
-    
-    return resolvedPath;
-  }
-
-  private static validateOutputPath(outputPath: string): string {
-    const resolved = path.resolve(outputPath);
-    
-    // Check if path is within allowed directories
-    const isAllowed = config.security.allowedDirs.some(allowedDir => {
-      const allowedResolved = path.resolve(allowedDir);
-      return resolved.startsWith(allowedResolved);
-    });
-    
-    if (!isAllowed) {
-      throw new SddError('Output path not allowed', 'INVALID_PATH');
-    }
-    
-    // Check file extension
-    const ext = path.extname(resolved);
-    if (!config.security.allowedExtensions.includes(ext)) {
-      throw new SddError(`File extension ${ext} not allowed`, 'INVALID_EXTENSION');
-    }
-    
-    return resolved;
-  }
-
-  private static async ensureDirectory(dirPath: string): Promise<void> {
-    try {
-      await fs.mkdir(dirPath, { recursive: true });
-    } catch (error) {
-      // Directory might already exist, ignore error
-      if ((error as any).code !== 'EEXIST') {
-        throw error;
-      }
-    }
-  }
-}
-
-// =============================================
-// Rate Limiting
-// =============================================
-
-class RateLimiter {
-  private requests = new Map<string, number[]>();
-
-  isAllowed(clientId: string = 'default', maxRequests = 100, windowMs = 60000): boolean {
-    const now = Date.now();
-    const windowStart = now - windowMs;
-    
-    const clientRequests = this.requests.get(clientId) || [];
-    const validRequests = clientRequests.filter(time => time > windowStart);
-    
-    if (validRequests.length >= maxRequests) {
-      return false;
-    }
-    
-    validRequests.push(now);
-    this.requests.set(clientId, validRequests);
-    return true;
-  }
-
-  // Clean up old entries periodically
-  cleanup(): void {
-    const now = Date.now();
-    for (const [clientId, requests] of this.requests.entries()) {
-      const validRequests = requests.filter(time => time > now - 300000); // 5 minutes
-      if (validRequests.length === 0) {
-        this.requests.delete(clientId);
-      } else {
-        this.requests.set(clientId, validRequests);
-      }
-    }
-  }
+interface SddGuideArgs {
+  query: string;
 }
 
 // =============================================
 // Type Guards
 // =============================================
 
-function isRequirementArgs(args: unknown): args is RequirementArgs {
-  if (typeof args !== 'object' || args === null) return false;
-  
+function isSddGuideArgs(args: unknown): args is SddGuideArgs {
+  if (typeof args !== "object" || args === null) return false;
   const obj = args as any;
-  return (
-    typeof obj.projectName === 'string' &&
-    typeof obj.projectDescription === 'string' &&
-    Array.isArray(obj.requirements) &&
-    obj.requirements.every((req: any) =>
-      typeof req.userStory === 'string' &&
-      Array.isArray(req.acceptanceCriteria)
-    ) &&
-    (obj.outputPath === undefined || typeof obj.outputPath === 'string')
-  );
-}
-
-function isDesignArgs(args: unknown): args is DesignArgs {
-  if (typeof args !== 'object' || args === null) return false;
-  
-  const obj = args as any;
-  return (
-    typeof obj.projectName === 'string' &&
-    typeof obj.projectDescription === 'string' &&
-    typeof obj.techStack === 'object' &&
-    obj.techStack !== null &&
-    (obj.components === undefined || Array.isArray(obj.components)) &&
-    (obj.dataModels === undefined || Array.isArray(obj.dataModels)) &&
-    (obj.outputPath === undefined || typeof obj.outputPath === 'string')
-  );
-}
-
-function isTasksArgs(args: unknown): args is TasksArgs {
-  if (typeof args !== 'object' || args === null) return false;
-  
-  const obj = args as any;
-  return (
-    typeof obj.projectName === 'string' &&
-    typeof obj.estimatedDuration === 'string' &&
-    Array.isArray(obj.keyDeliverables) &&
-    Array.isArray(obj.tasks) &&
-    obj.tasks.every((task: any) =>
-      typeof task.name === 'string' &&
-      typeof task.description === 'string' &&
-      Array.isArray(task.acceptanceCriteria) &&
-      Array.isArray(task.dependencies) &&
-      typeof task.estimate === 'string'
-    ) &&
-    (obj.outputPath === undefined || typeof obj.outputPath === 'string')
-  );
+  return typeof obj.query === "string";
 }
 
 // =============================================
-// Document Generators
+// SDD Process Guide
 // =============================================
 
-class RequirementsGenerator {
-  static generate(args: RequirementArgs): string {
-    const projectName = InputValidator.validateProjectName(args.projectName);
-    const projectDescription = InputValidator.validateDescription(args.projectDescription);
-    
-    let content = `# Requirements Document
+class SddGuide {
+  static generateGuidance(query: string): string {
+    return `Based on your query: "${query}"
+
+I will help you follow the Spec Driven Development (SDD) process. Here's what you need to do:
+
+## Understanding Spec Driven Development (SDD)
+
+SDD is a structured approach to software development that emphasizes specification-first development through a systematic process:
+
+1. **Requirements Analysis** - Define what the system should do
+2. **Design Planning** - Determine how the system will be built  
+3. **Task Breakdown** - Create actionable implementation steps
+4. **Iterative Implementation** - Execute tasks with quality focus
+
+## Step 1: Create the .sdd Directory
+
+First, I need to create a directory named ".sdd/" in your project to contain all the SDD files:
+
+\`\`\`bash
+mkdir -p .sdd
+\`\`\`
+
+**CRITICAL: Add .sdd to .gitignore**
+
+After creating the .sdd directory, I MUST immediately add the .sdd directory to .gitignore to prevent SDD files from being committed to version control:
+
+\`\`\`bash
+echo ".sdd/" >> .gitignore
+\`\`\`
+
+If .gitignore doesn't exist, I will create it first:
+
+\`\`\`bash
+touch .gitignore
+echo ".sdd/" >> .gitignore
+\`\`\`
+
+**IMPORTANT:** The .sdd directory and its contents should NEVER be committed to the repository as these are working documents that may contain sensitive planning information and should remain local to the development environment.
+
+## Step 2: Generate SDD Files Using EXACT Template Formats
+
+**🚨 MANDATORY HUMAN-IN-THE-LOOP PROCESS 🚨**
+
+I will generate files in THREE DISTINCT PHASES with MANDATORY human approval between each phase. I MUST NOT proceed to the next phase without explicit human approval.
+
+I will now generate the following files in sequence using the EXACT template formats specified below:
+
+### 2.1 Requirements Document (.sdd/requirements.md)
+
+**CRITICAL: Use this EXACT template format:**
+
+\`\`\`markdown
+# Requirements Document
 
 ## Introduction
-${projectDescription}
 
 ## Requirements
 
-`;
+### Requirement 1
 
-    args.requirements.forEach((req, index) => {
-      const userStory = InputValidator.validateUserStory(req.userStory);
-      const acceptanceCriteria = InputValidator.validateAcceptanceCriteria(req.acceptanceCriteria);
-      
-      content += `### Requirement ${index + 1}
-
-**User Story:** ${userStory}
+**User Story:** 
 
 #### Acceptance Criteria
-${acceptanceCriteria.map(criteria => `- ${criteria}`).join('\n')}
 
-`;
-    });
+### Requirement 2
 
-    return content;
-  }
-}
+**User Story:** 
 
-class DesignGenerator {
-  static generate(args: DesignArgs): string {
-    const projectName = InputValidator.validateProjectName(args.projectName);
-    const projectDescription = InputValidator.validateDescription(args.projectDescription);
-    
-    let content = `# Design Document
+#### Acceptance Criteria
+
+### Requirement 3
+
+**User Story:** 
+
+#### Acceptance Criteria
+\`\`\`
+
+### 2.2 Design Document (.sdd/design.md)
+
+**CRITICAL: Use this EXACT template format:**
+
+\`\`\`markdown
+# Design Document
 
 ## Overview
-${projectDescription}
+Brief description of the system and its purpose.
 
 ## High-Level Architecture
 System architecture diagram and explanation.
 
 ## Technology Stack
-`;
+- **Frontend**: 
+- **Backend**: 
+- **Database**: 
+- **Infrastructure**: 
 
-    if (args.techStack.frontend) {
-      const frontend = InputValidator.validateDescription(args.techStack.frontend);
-      content += `- **Frontend**: ${frontend}\n`;
-    }
-    if (args.techStack.backend) {
-      const backend = InputValidator.validateDescription(args.techStack.backend);
-      content += `- **Backend**: ${backend}\n`;
-    }
-    if (args.techStack.database) {
-      const database = InputValidator.validateDescription(args.techStack.database);
-      content += `- **Database**: ${database}\n`;
-    }
-    if (args.techStack.infrastructure) {
-      const infrastructure = InputValidator.validateDescription(args.techStack.infrastructure);
-      content += `- **Infrastructure**: ${infrastructure}\n`;
-    }
-
-    content += `
 ## Components and Interfaces
-`;
-
-    if (args.components && args.components.length > 0) {
-      const validatedComponents = args.components.map(comp => 
-        InputValidator.validateDescription(comp)
-      );
-      content += validatedComponents.map(component => `- ${component}`).join('\n');
-    } else {
-      content += 'Description of main components and their interactions.';
-    }
-
-    content += `
+Description of main components and their interactions.
 
 ## Data Models
 
 ### Core Types
-`;
-
-    if (args.dataModels && args.dataModels.length > 0) {
-      const validatedModels = args.dataModels.map(model => 
-        InputValidator.validateDescription(model)
-      );
-      content += validatedModels.map(model => `- ${model}`).join('\n');
-    } else {
-      content += 'Key data structures and their relationships.';
-    }
-
-    content += `
+Key data structures and their relationships.
 
 ### API Contracts
-Main endpoints and data flow.`;
+Main endpoints and data flow.
+\`\`\`
 
-    return content;
-  }
-}
+### 2.3 Implementation Plan (.sdd/tasks.md)
 
-class TasksGenerator {
-  static generate(args: TasksArgs): string {
-    const projectName = InputValidator.validateProjectName(args.projectName);
-    const estimatedDuration = InputValidator.validateDescription(args.estimatedDuration);
-    
-    let content = `# Implementation Plan
+**CRITICAL: Use this EXACT template format:**
+
+\`\`\`markdown
+# Implementation Plan
 
 ## Overview
-- **Project**: ${projectName}
-- **Estimated Duration**: ${estimatedDuration}
+- **Project**: 
 - **Key Deliverables**: 
-${args.keyDeliverables.map(deliverable => `  - ${InputValidator.validateDescription(deliverable)}`).join('\n')}
 
 ## Tasks
 
-`;
-
-    args.tasks.forEach((task, index) => {
-      const name = InputValidator.validateDescription(task.name);
-      const description = InputValidator.validateDescription(task.description);
-      const acceptanceCriteria = InputValidator.validateAcceptanceCriteria(task.acceptanceCriteria);
-      const dependencies = task.dependencies.map(dep => InputValidator.validateDescription(dep));
-      const estimate = InputValidator.validateDescription(task.estimate);
-      const requirementRef = task.requirementRef ? InputValidator.validateDescription(task.requirementRef) : undefined;
-      
-      content += `### Task ${index + 1}: ${name}
-- [ ] **Description**: ${description}
+### Task 1: [Component/Feature Name]
+- [ ] **Description**: 
 - [ ] **Acceptance Criteria**: 
-${acceptanceCriteria.map(criteria => `  - ${criteria}`).join('\n')}
-- [ ] **Dependencies**: ${dependencies.join(', ') || 'None'}
-- [ ] **Estimate**: ${estimate}
-${requirementRef ? `- [ ] **Requirements Reference**: ${requirementRef}` : ''}
+- [ ] **Dependencies**: 
+- [ ] **Requirements Reference**: REQ-
 
-`;
-    });
+### Task 2: [Component/Feature Name]
+- [ ] **Description**: 
+- [ ] **Acceptance Criteria**: 
+- [ ] **Dependencies**: 
+- [ ] **Requirements Reference**: REQ-
 
-    content += `## Definition of Done
+### Task 3: [Component/Feature Name]
+- [ ] **Description**: 
+- [ ] **Acceptance Criteria**: 
+- [ ] **Dependencies**: 
+- [ ] **Requirements Reference**: REQ-
+
+## Definition of Done
 - [ ] Code implemented and tested
 - [ ] All acceptance criteria met
 - [ ] Code reviewed
@@ -467,9 +185,84 @@ ${requirementRef ? `- [ ] **Requirements Reference**: ${requirementRef}` : ''}
 - [ ] Ready for deployment
 
 ## Notes
-Additional implementation notes or considerations.`;
+Additional implementation notes or considerations.
+\`\`\`
 
-    return content;
+## STRICT FORMATTING REQUIREMENTS
+
+**ABSOLUTELY CRITICAL:** You MUST use the exact template formats shown above. Do not deviate from:
+- Section headings and hierarchy
+- Markdown formatting
+- Bullet point structures  
+- Checkbox formats
+- Field placeholders
+- Overall document structure
+
+## Implementation Process
+
+After generating these documents using the EXACT formats above:
+
+1. **Review and refine** each document to ensure completeness
+2. **Execute tasks one by one** with focus on:
+   - Meeting all acceptance criteria
+   - Code review and testing
+   - Documentation updates
+   - Iterative refinement
+
+## Next Steps
+
+# 🚨 CRITICAL: MANDATORY HUMAN-IN-THE-LOOP PROCESS 🚨
+
+**ABSOLUTELY REQUIRED:** I MUST proceed through the SDD process one phase at a time with MANDATORY human approval between each phase. I am FORBIDDEN from generating multiple files without explicit approval.
+
+## PHASE-BY-PHASE EXECUTION WITH MANDATORY APPROVALS
+
+### 🔹 Phase 1: Setup and Requirements Generation
+1. **FIRST**: Create the .sdd directory using: \`mkdir -p .sdd\`
+2. **IMMEDIATELY AFTER**: Add .sdd to .gitignore (create .gitignore if it doesn't exist):
+   - If .gitignore exists: \`echo ".sdd/" >> .gitignore\`
+   - If .gitignore doesn't exist: \`touch .gitignore && echo ".sdd/" >> .gitignore\`
+3. **CRITICAL**: Verify .sdd is added to .gitignore BEFORE proceeding
+4. Generate requirements.md using the EXACT template format shown above
+5. **🛑 MANDATORY STOP: Ask human to review requirements.md**
+6. **⏸️ WAIT: Do not proceed until receiving explicit human approval**
+7. **❌ FORBIDDEN: Do not generate design.md until Phase 1 is approved**
+
+### 🔹 Phase 2: Design Generation (ONLY after explicit Phase 1 approval)
+1. **✅ PREREQUISITE: Confirm Phase 1 approval received**
+2. **Check for Context7 MCP server availability** - Before generating design.md, check if the Context7 MCP server is connected and available by looking for the "github.com/upstash/context7-mcp" server in the available MCP servers
+3. **If Context7 is available:** 
+   - Use the "resolve-library-id" tool to find Context7-compatible library IDs for any technologies, frameworks, or libraries mentioned in the requirements
+   - Use the "get-library-docs" tool to fetch the latest documentation for each identified technology
+   - Focus on retrieving documentation that covers: architecture patterns, best practices, API specifications, configuration options, and integration guidelines
+   - Incorporate these insights into the design to ensure it reflects current standards and recommended approaches
+4. **If Context7 is not available:** Proceed with design.md generation using general best practices knowledge
+5. Generate design.md using the EXACT template format shown above, incorporating insights from the latest documentation when available
+6. **🛑 MANDATORY STOP: Ask human to review design.md**
+7. **⏸️ WAIT: Do not proceed until receiving explicit human approval**
+8. **❌ FORBIDDEN: Do not generate tasks.md until Phase 2 is approved**
+
+### 🔹 Phase 3: Implementation Planning (ONLY after explicit Phase 2 approval)
+1. **✅ PREREQUISITE: Confirm Phase 2 approval received**
+2. Generate tasks.md using the EXACT template format shown above
+3. **🛑 MANDATORY STOP: Ask human to review tasks.md**
+4. **⏸️ WAIT: Do not proceed until receiving explicit human approval**
+5. **❌ FORBIDDEN: Do not begin implementation until Phase 3 is approved**
+
+## 🚨 CRITICAL INSTRUCTIONS FOR AI EXECUTION 🚨
+
+**ABSOLUTE REQUIREMENTS:**
+- ❌ **NEVER generate all files at once**
+- ❌ **NEVER skip human approval phases**
+- ❌ **NEVER proceed to next phase without explicit approval**
+- ✅ **ALWAYS complete ONE phase completely before asking for approval**
+- ✅ **ALWAYS ask explicitly: "I have completed [Phase Name]. Please review the [document name] document. Do you approve this phase so I can proceed to [Next Phase], or would you like me to make changes first?"**
+- ✅ **ALWAYS wait for explicit human response before proceeding**
+- ✅ **ALWAYS allow human to request modifications before moving forward**
+
+**ENFORCEMENT:** If AI attempts to generate multiple documents without approval, this violates the SDD human-in-the-loop requirement and must be immediately corrected.
+
+Each file MUST follow the exact template structures provided - no variations or creative interpretations allowed.`;
   }
 }
 
@@ -479,7 +272,6 @@ Additional implementation notes or considerations.`;
 
 class SddServer {
   private server: Server;
-  private rateLimiter: RateLimiter;
 
   constructor() {
     this.server = new Server(
@@ -494,186 +286,35 @@ class SddServer {
       }
     );
 
-    this.rateLimiter = new RateLimiter();
     this.setupToolHandlers();
-    
+
     // Error handling
-    this.server.onerror = (error) => console.error('[MCP Error]', error);
-    process.on('SIGINT', async () => {
+    this.server.onerror = (error) => console.error("[MCP Error]", error);
+    process.on("SIGINT", async () => {
       await this.server.close();
       process.exit(0);
     });
-
-    // Cleanup rate limiter periodically
-    setInterval(() => this.rateLimiter.cleanup(), 300000); // 5 minutes
   }
 
   private setupToolHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
-          name: 'generate_requirements',
-          description: 'Generate a requirements document following the SDD template',
+          name: "sdd_guide",
+          description:
+            "Provides guidance on the Spec Driven Development (SDD) process and instructs the AI to create .sdd directory and generate SDD files",
           inputSchema: {
-            type: 'object',
+            type: "object",
             properties: {
-              projectName: {
-                type: 'string',
-                description: 'Name of the project (1-100 characters, alphanumeric)',
+              query: {
+                type: "string",
+                description:
+                  "User query or project description to guide the SDD process",
                 minLength: 1,
-                maxLength: 100,
-                pattern: '^[a-zA-Z0-9\\s\\-_.]+$',
-              },
-              projectDescription: {
-                type: 'string',
-                description: 'Brief description of the project',
-                maxLength: config.security.maxInputLength,
-              },
-              requirements: {
-                type: 'array',
-                description: 'List of requirements',
-                minItems: 1,
-                items: {
-                  type: 'object',
-                  properties: {
-                    userStory: {
-                      type: 'string',
-                      description: 'User story for the requirement',
-                      minLength: 1,
-                      maxLength: 1000,
-                    },
-                    acceptanceCriteria: {
-                      type: 'array',
-                      description: 'List of acceptance criteria',
-                      minItems: 1,
-                      items: {
-                        type: 'string',
-                        maxLength: 500,
-                      },
-                    },
-                  },
-                  required: ['userStory', 'acceptanceCriteria'],
-                  additionalProperties: false,
-                },
-              },
-              outputPath: {
-                type: 'string',
-                description: 'Optional output path for the requirements document',
+                maxLength: 1000,
               },
             },
-            required: ['projectName', 'projectDescription', 'requirements'],
-            additionalProperties: false,
-          },
-        },
-        {
-          name: 'generate_design',
-          description: 'Generate a design document following the SDD template',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              projectName: {
-                type: 'string',
-                description: 'Name of the project',
-                minLength: 1,
-                maxLength: 100,
-                pattern: '^[a-zA-Z0-9\\s\\-_.]+$',
-              },
-              projectDescription: {
-                type: 'string',
-                description: 'Brief description of the project',
-                maxLength: config.security.maxInputLength,
-              },
-              techStack: {
-                type: 'object',
-                properties: {
-                  frontend: { type: 'string', maxLength: 200 },
-                  backend: { type: 'string', maxLength: 200 },
-                  database: { type: 'string', maxLength: 200 },
-                  infrastructure: { type: 'string', maxLength: 200 },
-                },
-                description: 'Technology stack for the project',
-                additionalProperties: false,
-              },
-              components: {
-                type: 'array',
-                items: { type: 'string', maxLength: 200 },
-                description: 'List of main components',
-              },
-              dataModels: {
-                type: 'array',
-                items: { type: 'string', maxLength: 200 },
-                description: 'List of data models',
-              },
-              outputPath: {
-                type: 'string',
-                description: 'Optional output path for the design document',
-              },
-            },
-            required: ['projectName', 'projectDescription', 'techStack'],
-            additionalProperties: false,
-          },
-        },
-        {
-          name: 'generate_tasks',
-          description: 'Generate an implementation plan (tasks) following the SDD template',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              projectName: {
-                type: 'string',
-                description: 'Name of the project',
-                minLength: 1,
-                maxLength: 100,
-                pattern: '^[a-zA-Z0-9\\s\\-_.]+$',
-              },
-              estimatedDuration: {
-                type: 'string',
-                description: 'Estimated project duration',
-                maxLength: 100,
-              },
-              keyDeliverables: {
-                type: 'array',
-                items: { type: 'string', maxLength: 200 },
-                description: 'List of key deliverables',
-                minItems: 1,
-              },
-              tasks: {
-                type: 'array',
-                description: 'List of implementation tasks',
-                minItems: 1,
-                items: {
-                  type: 'object',
-                  properties: {
-                    name: { type: 'string', description: 'Task name', maxLength: 200 },
-                    description: { type: 'string', description: 'Task description', maxLength: 1000 },
-                    acceptanceCriteria: {
-                      type: 'array',
-                      items: { type: 'string', maxLength: 500 },
-                      description: 'Task acceptance criteria',
-                      minItems: 1,
-                    },
-                    dependencies: {
-                      type: 'array',
-                      items: { type: 'string', maxLength: 200 },
-                      description: 'Task dependencies',
-                    },
-                    estimate: { type: 'string', description: 'Time estimate', maxLength: 100 },
-                    requirementRef: {
-                      type: 'string',
-                      description: 'Reference to requirement (e.g., REQ-1)',
-                      maxLength: 50,
-                    },
-                  },
-                  required: ['name', 'description', 'acceptanceCriteria', 'dependencies', 'estimate'],
-                  additionalProperties: false,
-                },
-              },
-              outputPath: {
-                type: 'string',
-                description: 'Optional output path for the tasks document',
-              },
-            },
-            required: ['projectName', 'estimatedDuration', 'keyDeliverables', 'tasks'],
+            required: ["query"],
             additionalProperties: false,
           },
         },
@@ -682,18 +323,9 @@ class SddServer {
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
-        // Rate limiting check
-        if (!this.rateLimiter.isAllowed()) {
-          throw new SddError('Rate limit exceeded', 'RATE_LIMIT_EXCEEDED', 429);
-        }
-
         switch (request.params.name) {
-          case 'generate_requirements':
-            return await this.generateRequirements(request.params.arguments);
-          case 'generate_design':
-            return await this.generateDesign(request.params.arguments);
-          case 'generate_tasks':
-            return await this.generateTasks(request.params.arguments);
+          case "sdd_guide":
+            return await this.provideSddGuidance(request.params.arguments);
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
@@ -701,27 +333,13 @@ class SddServer {
             );
         }
       } catch (error) {
-        if (error instanceof SddError) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `${error.code}: ${error.message}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-        
-        if (error instanceof McpError) {
-          throw error; // Re-throw MCP errors
-        }
-        
         return {
           content: [
             {
-              type: 'text',
-              text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              type: "text",
+              text: `Error: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`,
             },
           ],
           isError: true,
@@ -730,64 +348,20 @@ class SddServer {
     });
   }
 
-  private async generateRequirements(args: unknown) {
-    if (!isRequirementArgs(args)) {
-      throw new SddError('Invalid arguments for generate_requirements', 'INVALID_ARGS');
+  private async provideSddGuidance(args: unknown) {
+    if (!isSddGuideArgs(args)) {
+      throw new Error(
+        "Invalid arguments for sdd_guide. Expected: { query: string }"
+      );
     }
 
-    const content = RequirementsGenerator.generate(args);
-    const outputPath = await SecureFileManager.writeSecurely(
-      args.outputPath || './requirements.md',
-      content
-    );
+    const guidance = SddGuide.generateGuidance(args.query);
 
     return {
       content: [
         {
-          type: 'text',
-          text: `Requirements document generated successfully at: ${outputPath}`,
-        },
-      ],
-    };
-  }
-
-  private async generateDesign(args: unknown) {
-    if (!isDesignArgs(args)) {
-      throw new SddError('Invalid arguments for generate_design', 'INVALID_ARGS');
-    }
-
-    const content = DesignGenerator.generate(args);
-    const outputPath = await SecureFileManager.writeSecurely(
-      args.outputPath || './design.md',
-      content
-    );
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Design document generated successfully at: ${outputPath}`,
-        },
-      ],
-    };
-  }
-
-  private async generateTasks(args: unknown) {
-    if (!isTasksArgs(args)) {
-      throw new SddError('Invalid arguments for generate_tasks', 'INVALID_ARGS');
-    }
-
-    const content = TasksGenerator.generate(args);
-    const outputPath = await SecureFileManager.writeSecurely(
-      args.outputPath || './tasks.md',
-      content
-    );
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Tasks document generated successfully at: ${outputPath}`,
+          type: "text",
+          text: guidance,
         },
       ],
     };
@@ -796,7 +370,7 @@ class SddServer {
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('SDD MCP server running on stdio');
+    console.error("SDD MCP server running on stdio");
   }
 }
 

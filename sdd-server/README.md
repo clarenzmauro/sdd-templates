@@ -1,24 +1,24 @@
 # SDD MCP Server
 
-A secure Model Context Protocol (MCP) server that simplifies Spec Driven Development (SDD) by automating the generation of requirements, design, and task documents.
+A lightweight Model Context Protocol (MCP) server that provides guidance on Spec Driven Development (SDD) process and instructs AI assistants to create SDD documentation files.
 
 ## Features
 
-- 🔒 **Enterprise Security**: Input sanitization, path validation, rate limiting, and file size controls
-- 📝 **Requirements Generation**: Create structured requirements documents with user stories and acceptance criteria
-- 🏗️ **Design Documentation**: Generate comprehensive design documents with tech stack and architecture details
-- ✅ **Task Planning**: Produce detailed implementation plans with tasks, dependencies, and estimates
-- 🐳 **Docker Support**: Containerized deployment with security hardening
-- ⚡ **High Performance**: Optimized for production use with configurable limits
+- 📋 **SDD Process Guidance**: Provides comprehensive instructions on the Spec Driven Development methodology
+- 🤖 **AI Instructions**: Tells AI assistants how to create .sdd directory and generate SDD files
+- 📝 **Template Guidance**: Guides creation of requirements, design, and task documents
+- 🐳 **Docker Support**: Containerized deployment for easy integration
+- ⚡ **Lightweight**: Simple, focused implementation without complex file handling
 
-## Security Features
+## What This Server Does
 
-- **Input Sanitization**: Prevents XSS and script injection attacks
-- **Path Traversal Protection**: Restricts file access to allowed directories only
-- **Rate Limiting**: Prevents abuse with configurable request limits (100/minute default)
-- **File Size Limits**: Configurable content size restrictions (1MB default)
-- **Type Safety**: Comprehensive runtime validation with TypeScript
-- **Error Handling**: Specific error codes with proper HTTP status mapping
+This server provides a single tool called `sdd_guide` that:
+- Explains the SDD process to AI assistants
+- Instructs them to create a `.sdd/` directory
+- Guides them to generate the three core SDD files:
+  - `requirements.md` - User stories and acceptance criteria
+  - `design.md` - System architecture and tech stack
+  - `tasks.md` - Implementation plan with tasks and estimates
 
 ## Installation
 
@@ -44,7 +44,7 @@ cd sdd-templates/sdd-server
 # Build the Docker image
 docker build -t sdd-server:latest .
 
-# Or use Docker Compose
+# Start the persistent container
 docker-compose up -d
 ```
 
@@ -119,33 +119,20 @@ docker-compose up -d
 
 ### Quick Setup (Recommended)
 
-Since you already have the server running via Docker Compose, here's how to add it to Cline:
+After building the Docker image, here's how to add the SDD server to Cline:
 
 1. **Open Cline Settings**
    - In VS Code, open Command Palette (`Cmd+Shift+P` on Mac, `Ctrl+Shift+P` on Windows/Linux)
    - Type "Cline: Open MCP Settings"
    - Or manually open: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
 
-2. **Add SDD Server Configuration**
-   ```json
-   {
-     "mcpServers": {
-       "sdd-server": {
-         "command": "docker",
-         "args": [
-           "run", "--rm", "-i",
-           "sdd-server:latest"
-         ],
-         "env": {
-           "MAX_FILE_SIZE": "1048576",
-           "MAX_INPUT_LENGTH": "10000"
-         }
-       }
-     }
-   }
+2. **Start the Persistent Container**
+   ```bash
+   cd /path/to/your/sdd-server
+   docker-compose up -d
    ```
 
-3. **Alternative: Use Docker Compose**
+3. **Add SDD Server Configuration (Docker Compose - Recommended)**
    ```json
    {
      "mcpServers": {
@@ -153,29 +140,76 @@ Since you already have the server running via Docker Compose, here's how to add 
          "command": "docker-compose",
          "args": [
            "-f", "/path/to/your/sdd-server/docker-compose.yml",
-           "run", "--rm", "sdd-server"
+           "exec", "sdd-server", "node", "build/index.js"
          ],
-         "cwd": "/path/to/your/sdd-server"
+         "disabled": false,
+         "autoApprove": [
+           "sdd_guide"
+         ]
+       }
+     }
+   }
+   ```
+   **Important**: Replace `/path/to/your/sdd-server/` with the actual path to your cloned repository.
+
+4. **Alternative: Direct Docker Command**
+   ```json
+   {
+     "mcpServers": {
+       "sdd-server": {
+         "command": "docker",
+         "args": [
+           "run", "--rm", "-i",
+           "-v", "${PWD}:/workspace",
+           "sdd-server:latest"
+         ],
+         "disabled": false,
+         "autoApprove": [
+           "sdd_guide"
+         ]
        }
      }
    }
    ```
 
-4. **For Local Development (if built locally)**
+5. **For Local Development (if built locally)**
    ```json
    {
      "mcpServers": {
        "sdd-server": {
          "command": "node",
          "args": ["/path/to/your/sdd-server/build/index.js"],
-         "env": {
-           "MAX_FILE_SIZE": "1048576",
-           "MAX_INPUT_LENGTH": "10000"
-         }
+         "disabled": false,
+         "autoApprove": [
+           "sdd_guide"
+         ]
        }
      }
    }
    ```
+
+### Complete Setup Example
+
+For a typical installation, your complete MCP settings file should look like this:
+```json
+{
+  "mcpServers": {
+    "sdd-server": {
+      "command": "docker-compose",
+      "args": [
+        "-f", "/Users/yourname/path/to/sdd-templates/sdd-server/docker-compose.yml",
+        "exec", "sdd-server", "node", "build/index.js"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "sdd_guide"
+      ]
+    }
+  }
+}
+```
+
+**Remember**: You must run `docker-compose up -d` first to start the persistent container!
 
 ### Configuration Options
 
@@ -188,8 +222,6 @@ You can customize the server behavior by setting environment variables:
       "command": "docker",
       "args": ["run", "--rm", "-i", "sdd-server:latest"],
       "env": {
-        "MAX_FILE_SIZE": "2097152",         // 2MB limit
-        "MAX_INPUT_LENGTH": "20000",        // 20K character limit
         "SERVER_NAME": "my-sdd-server",     // Custom server name
         "SERVER_VERSION": "0.1.0"          // Version identifier
       }
@@ -202,10 +234,7 @@ You can customize the server behavior by setting environment variables:
 
 1. **Restart Cline** after updating the MCP settings
 2. **Check Server Status** - You should see "sdd-server" listed in Cline's MCP servers
-3. **Test Connection** - Try using one of the SDD tools:
-   - `generate_requirements`
-   - `generate_design` 
-   - `generate_tasks`
+3. **Test Connection** - Try using the SDD guide tool: `sdd_guide`
 
 ### Troubleshooting MCP Integration
 
@@ -228,143 +257,36 @@ You can customize the server behavior by setting environment variables:
 Once configured, you can use the SDD server directly in Cline:
 
 ```
-Generate requirements for a todo application with the following user stories:
-- As a user, I want to add tasks
-- As a user, I want to mark tasks as complete
-- As a user, I want to delete tasks
+I want to build a todo application for teams
 ```
 
-Cline will automatically use the `generate_requirements` tool to create a structured requirements document.
+Cline will automatically use the `sdd_guide` tool to provide comprehensive guidance on implementing the SDD process for your project.
 
-### Environment Variables
+## MCP Tool
 
-Configure the server using environment variables:
+The server provides one main tool:
 
-```bash
-# Server configuration
-SERVER_NAME=sdd-server
-SERVER_VERSION=0.1.0
+### SDD Guide (`sdd_guide`)
 
-# Security settings
-MAX_FILE_SIZE=1048576          # Maximum file size in bytes (default: 1MB)
-MAX_INPUT_LENGTH=10000         # Maximum input length (default: 10,000 chars)
-```
-
-## MCP Tools
-
-The server provides three main tools:
-
-### 1. Generate Requirements (`generate_requirements`)
-
-Creates a structured requirements document with user stories and acceptance criteria.
+Provides comprehensive guidance on the Spec Driven Development process and instructs AI assistants on how to create SDD documentation.
 
 **Parameters:**
-- `projectName` (string): Name of the project (1-100 characters)
-- `projectDescription` (string): Brief project description
-- `requirements` (array): List of requirements with user stories and acceptance criteria
-- `outputPath` (string, optional): Output file path (defaults to `./requirements.md`)
+- `query` (string): User query or project description to guide the SDD process (1-1000 characters)
 
 **Example:**
 ```json
 {
-  "projectName": "Todo App",
-  "projectDescription": "A simple task management application",
-  "requirements": [
-    {
-      "userStory": "As a user, I want to add new tasks",
-      "acceptanceCriteria": [
-        "User can enter task description",
-        "Task is saved to the system",
-        "User receives confirmation"
-      ]
-    }
-  ]
+  "query": "I want to build a todo application for teams"
 }
 ```
 
-### 2. Generate Design (`generate_design`)
-
-Creates a comprehensive design document with architecture and technical details.
-
-**Parameters:**
-- `projectName` (string): Name of the project
-- `projectDescription` (string): Brief project description
-- `techStack` (object): Technology stack details (frontend, backend, database, infrastructure)
-- `components` (array, optional): List of main components
-- `dataModels` (array, optional): List of data models
-- `outputPath` (string, optional): Output file path (defaults to `./design.md`)
-
-**Example:**
-```json
-{
-  "projectName": "Todo App",
-  "projectDescription": "A simple task management application",
-  "techStack": {
-    "frontend": "React with TypeScript",
-    "backend": "Node.js with Express",
-    "database": "PostgreSQL",
-    "infrastructure": "AWS with Docker"
-  },
-  "components": ["TaskList", "TaskForm", "TaskItem"],
-  "dataModels": ["Task", "User", "Category"]
-}
-```
-
-### 3. Generate Tasks (`generate_tasks`)
-
-Produces detailed implementation plans with tasks, dependencies, and estimates.
-
-**Parameters:**
-- `projectName` (string): Name of the project
-- `estimatedDuration` (string): Project duration estimate
-- `keyDeliverables` (array): List of key deliverables
-- `tasks` (array): Implementation tasks with details
-- `outputPath` (string, optional): Output file path (defaults to `./tasks.md`)
-
-**Example:**
-```json
-{
-  "projectName": "Todo App",
-  "estimatedDuration": "4 weeks",
-  "keyDeliverables": ["Web Application", "API", "Database"],
-  "tasks": [
-    {
-      "name": "Setup Development Environment",
-      "description": "Initialize project structure and dependencies",
-      "acceptanceCriteria": [
-        "Project structure created",
-        "Dependencies installed",
-        "Development server running"
-      ],
-      "dependencies": [],
-      "estimate": "1 day",
-      "requirementRef": "REQ-1"
-    }
-  ]
-}
-```
-
-## Security Considerations
-
-### Input Validation
-- All inputs are validated for type, length, and format
-- HTML content is sanitized to prevent XSS attacks
-- Path traversal attempts are blocked
-
-### File System Security
-- Output paths are restricted to allowed directories: `./output`, `./temp`, `./`
-- Only `.md` and `.txt` file extensions are permitted
-- File sizes are limited to prevent resource exhaustion
-
-### Rate Limiting
-- 100 requests per minute per client (configurable)
-- Automatic cleanup of old rate limit entries
-- Per-client tracking with sliding window algorithm
-
-### Error Handling
-- Specific error codes for different failure types
-- No sensitive information leaked in error messages
-- Proper HTTP status code mapping
+**What it does:**
+- Explains the SDD methodology (Requirements → Design → Tasks → Implementation)
+- Instructs the AI to create a `.sdd/` directory
+- Guides creation of three core files:
+  - `requirements.md` - User stories and acceptance criteria
+  - `design.md` - System architecture and tech stack
+  - `tasks.md` - Implementation plan with tasks and estimates
 
 ## Development
 
@@ -396,38 +318,26 @@ npm run docker:compose  # Start with Docker Compose
 
 ## Configuration
 
-### Security Settings
-The server supports various security configurations through environment variables:
+The server supports basic configuration through environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MAX_FILE_SIZE` | Maximum file size in bytes | 1048576 (1MB) |
-| `MAX_INPUT_LENGTH` | Maximum input string length | 10000 |
 | `SERVER_NAME` | Server identification name | sdd-server |
 | `SERVER_VERSION` | Server version | 0.1.0 |
-
-### File Permissions
-Generated files are created with secure permissions (644) and in restricted directories only.
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Permission Denied Errors**
-   - Ensure output directories exist and are writable
-   - Check file permissions and ownership
+1. **Server Not Starting**
+   - Ensure Node.js 18+ is installed
+   - Check that all dependencies are installed with `npm install`
+   - Verify the build completed successfully with `npm run build`
 
-2. **Rate Limit Exceeded**
-   - Wait for the rate limit window to reset (1 minute)
-   - Configure higher limits via environment variables if needed
-
-3. **Invalid Path Errors**
-   - Ensure output paths are within allowed directories
-   - Use relative paths starting with `./`
-
-4. **File Size Errors**
-   - Reduce content size or increase `MAX_FILE_SIZE` limit
-   - Check available disk space
+2. **Docker Issues**
+   - Ensure Docker is running: `docker ps`
+   - Check if the image was built: `docker images sdd-server`
+   - Restart the container: `docker-compose restart`
 
 ### Debug Mode
 Use the MCP Inspector for debugging:
@@ -437,18 +347,8 @@ npm run inspector
 
 ## Contributing
 
-This is a production-ready MCP server with enterprise-grade security features. For issues or feature requests, please refer to the project documentation.
+This is a lightweight MCP server for SDD guidance. For issues or feature requests, please refer to the project documentation.
 
 ## License
 
 MIT License - see package.json for details.
-
-## Security
-
-This server implements comprehensive security measures:
-- All inputs are validated and sanitized
-- File system access is restricted and monitored
-- Rate limiting prevents abuse
-- Error handling prevents information disclosure
-
-For security-related questions or to report vulnerabilities, please contact the development team.

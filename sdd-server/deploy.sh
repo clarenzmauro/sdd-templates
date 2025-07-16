@@ -34,19 +34,32 @@ mkdir -p ./output
 echo "🎯 SDD MCP Server is ready!"
 echo ""
 echo "📋 Next steps:"
-echo "1. To run the server: docker run --rm -i sdd-server:latest"
-echo "2. To use with docker-compose: docker-compose up -d"
+echo "1. To run the server with proper volume mounting:"
+echo "   docker run --rm -i -v \"\$(pwd):/workspace\" -e USER_WORKING_DIR=/workspace sdd-server:latest"
+echo ""
+echo "2. To use with docker-compose (recommended):"
+echo "   docker-compose up -d"
+echo ""
 echo "3. Add to your MCP configuration:"
 echo ""
 echo '{
   "mcpServers": {
     "sdd-server": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "sdd-server:latest"],
+      "args": [
+        "run", "--rm", "-i", 
+        "-v", "$(pwd):/workspace",
+        "-e", "USER_WORKING_DIR=/workspace",
+        "sdd-server:latest"
+      ],
       "disabled": false,
       "autoApprove": []
     }
   }
 }'
+echo ""
+echo "⚠️  IMPORTANT: The server now generates files in your project's .sdd/ directory"
+echo "   instead of the container's /app directory. This ensures files are saved"
+echo "   in your actual project folder."
 echo ""
 echo "🎉 Deployment complete!"
